@@ -1,0 +1,375 @@
+// BikeTracker — Prisma Schema
+// Target: PostgreSQL (Neon serverless)
+// Generated for: Honda Dio owner, Pixel 9, Sri Lanka
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL") // required for Neon + Prisma migrations
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum VehicleType {
+  BIKE
+  SCOOTER
+  CAR
+  THREE_WHEELER
+}
+
+enum FuelType {
+  OCTANE_92
+  OCTANE_95
+  DIESEL
+  ELECTRIC
+}
+
+enum MaintenanceStatus {
+  OK
+  DUE_SOON // within 500 km or 14 days
+  OVERDUE
+}
+
+enum ReminderType {
+  INSURANCE
+  REVENUE_LICENSE
+  EMISSION_TEST
+  OTHER
+}
+
+enum ExpenseCategory {
+  FUEL
+  MAINTENANCE
+  RENEWAL
+  PARKING
+  WASHING
+  ACCESSORIES
+  TOLL
+  OTHER
+}
+
+enum OdometerSource {
+  MANUAL
+  FUEL_ENTRY
+  MAINTENANCE_LOG
+}
+
+enum NotificationChannel {
+  WEB_PUSH
+  IN_APP
+  EMAIL
+}
+
+enum NotificationType {
+  MAINTENANCE_DUE
+  MAINTENANCE_OVERDUE
+  RENEWAL_DUE
+  LOW_FUEL
+  REMINDER
+}
+
+// ─────────────────────────────────────────────
+// USER
+// Clerk handles auth — we mirror minimal data
+// ─────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  clerkId   String   @unique
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vehicles      Vehicle[]
+  settings      UserSettings?
+  notifications Notification[]
+  pushSubs      PushSubscription[]
+
+  @@index([clerkId])
+}
+
+model UserSettings {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  currency              String   @default("LKR")
+  defaultFuelType       FuelType @default(OCTANE_92)
+  lowFuelThresholdPct   Int      @default(20) // alert when estimated < 20%
+  dueSoonKmThreshold    Int      @default(500) // flag maintenance within 500 km
+  dueSoonDayThreshold   Int      @default(14)  // flag renewals within 14 days
+  defaultVehicleId      String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────
+// VEHICLE
+// ─────────────────────────────────────────────
+
+model Vehicle {
+  id                   String      @id @default(cuid())
+  userId               String
+  name                 String      // e.g. "My Dio"
+  make                 String      // e.g. "Honda"
+  model                String      // e.g. "Dio"
+  registrationNo       String?
+  type                 VehicleType @default(SCOOTER)
+  fuelType             FuelType    @default(OCTANE_92)
+  tankCapacityL        Float       @default(5.3)    // Honda Dio: 5.3 L
+  baselineKmpl         Float       @default(48.0)   // seeded default
+  currentOdometerKm    Float       @default(0)
+  purchaseDate         DateTime?
+  isActive             Boolean     @default(true)
+  lowFuelThresholdPct  Int?        // per-vehicle override; null = use UserSettings
+  notes                String?
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+
+  user                User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fuelEntries         FuelEntry[]
+  odometerReadings    OdometerReading[]
+  maintenanceTasks    MaintenanceTask[]
+  renewalReminders    RenewalReminder[]
+  expenses            Expense[]
+  notifications       Notification[]
+
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────
+// FUEL
+// ─────────────────────────────────────────────
+
+model FuelEntry {
+  id             String    @id @default(cuid())
+  vehicleId      String
+  date           DateTime
+  odometerKm     Float
+  litersFilled   Float
+  pricePerLiter  Float
+  totalCost      Float     // stored (not derived) for speed; = litersFilled × pricePerLiter
+  isFullTank     Boolean   @default(true)
+  station        String?
+  fuelType       FuelType  @default(OCTANE_92)
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // computed mileage for THIS fill-up (km / liters since last full-tank)
+  // null for first entry or partial fills
+  calculatedKmpl Float?
+
+  vehicle         Vehicle          @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  odometerReading OdometerReading? // auto-created alongside
+  expense         Expense?         // auto-created in the service layer
+
+  @@index([vehicleId, date(sort: Desc)])
+  @@index([vehicleId, isFullTank])
+}
+
+// ─────────────────────────────────────────────
+// ODOMETER
+// Separate table to track all odometer events
+// (fuel, manual, maintenance)
+// ─────────────────────────────────────────────
+
+model OdometerReading {
+  id          String         @id @default(cuid())
+  vehicleId   String
+  date        DateTime
+  odometerKm  Float
+  source      OdometerSource @default(MANUAL)
+  fuelEntryId String?        @unique
+  notes       String?
+  createdAt   DateTime       @default(now())
+
+  vehicle   Vehicle    @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  fuelEntry FuelEntry? @relation(fields: [fuelEntryId], references: [id])
+
+  @@index([vehicleId, date(sort: Desc)])
+}
+
+// ─────────────────────────────────────────────
+// MAINTENANCE
+// ─────────────────────────────────────────────
+
+model MaintenanceTask {
+  id              String            @id @default(cuid())
+  vehicleId       String
+  type            String            // e.g. "oil_change", "full_service" — free-form slug
+  label           String            // display name: "Engine Oil Change"
+  intervalKm      Int?              // null = time-only task (e.g. battery check)
+  intervalMonths  Int?              // null = km-only task
+  lastDoneKm      Float?
+  lastDoneDate    DateTime?
+  nextDueKm       Float?            // recomputed after each log
+  nextDueDate     DateTime?         // recomputed after each log
+  status          MaintenanceStatus @default(OK)
+  isActive        Boolean           @default(true)
+  sortOrder       Int               @default(0)
+  notes           String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  vehicle Vehicle          @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  logs    MaintenanceLog[]
+
+  @@index([vehicleId, status])
+  @@index([vehicleId, nextDueDate])
+  @@index([vehicleId, nextDueKm])
+}
+
+model MaintenanceLog {
+  id        String    @id @default(cuid())
+  taskId    String
+  doneDate  DateTime
+  doneAtKm  Float?
+  cost      Float?
+  vendor    String?
+  notes     String?
+  receiptUrl String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  task    MaintenanceTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  expense Expense?        // auto-created in service layer if cost > 0
+
+  @@index([taskId, doneDate(sort: Desc)])
+}
+
+// ─────────────────────────────────────────────
+// RENEWALS (Insurance, Revenue License, etc.)
+// ─────────────────────────────────────────────
+
+model RenewalReminder {
+  id                String       @id @default(cuid())
+  vehicleId         String
+  type              ReminderType
+  label             String       // "Commercial Insurance", "Revenue License 2025"
+  provider          String?      // insurer or dept name
+  policyNo          String?
+  currentExpiryDate DateTime
+  lastRenewedDate   DateTime?
+  lastCost          Float?
+  documentUrl       String?      // link to uploaded PDF/image
+  isActive          Boolean      @default(true)
+  notes             String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  vehicle Vehicle      @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  logs    RenewalLog[]
+
+  @@index([vehicleId, currentExpiryDate])
+  @@index([vehicleId, type])
+}
+
+model RenewalLog {
+  id          String   @id @default(cuid())
+  reminderId  String
+  renewedDate DateTime
+  expiryDate  DateTime
+  cost        Float?
+  receiptUrl  String?
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  reminder RenewalReminder @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+  expense  Expense?        // auto-created in service layer if cost > 0
+
+  @@index([reminderId, renewedDate(sort: Desc)])
+}
+
+// ─────────────────────────────────────────────
+// EXPENSE LEDGER
+// Every fuel/maintenance/renewal entry auto-inserts here.
+// Powers the unified cost dashboard.
+// ─────────────────────────────────────────────
+
+model Expense {
+  id          String          @id @default(cuid())
+  vehicleId   String
+  date        DateTime
+  category    ExpenseCategory
+  amount      Float
+  description String?
+
+  // At most one of these will be set (the source record)
+  fuelEntryId         String?         @unique
+  maintenanceLogId    String?         @unique
+  renewalLogId        String?         @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vehicle        Vehicle         @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  fuelEntry      FuelEntry?      @relation(fields: [fuelEntryId], references: [id])
+  maintenanceLog MaintenanceLog? @relation(fields: [maintenanceLogId], references: [id])
+  renewalLog     RenewalLog?     @relation(fields: [renewalLogId], references: [id])
+
+  @@index([vehicleId, date(sort: Desc)])
+  @@index([vehicleId, category])
+}
+
+// ─────────────────────────────────────────────
+// FUEL PRICE HISTORY
+// Track official LKR/L gazette changes over time
+// ─────────────────────────────────────────────
+
+model PriceHistory {
+  id            String   @id @default(cuid())
+  fuelType      FuelType
+  pricePerLiter Float
+  effectiveDate DateTime
+  source        String?  // e.g. "CPC Gazette 2025-10-31"
+  createdAt     DateTime @default(now())
+
+  @@unique([fuelType, effectiveDate])
+  @@index([fuelType, effectiveDate(sort: Desc)])
+}
+
+// ─────────────────────────────────────────────
+// NOTIFICATIONS
+// ─────────────────────────────────────────────
+
+model Notification {
+  id         String              @id @default(cuid())
+  userId     String
+  vehicleId  String?
+  type       NotificationType
+  channel    NotificationChannel
+  title      String
+  body       String
+  dueRefId   String?             // FK to the triggering record (task/reminder id)
+  sentAt     DateTime            @default(now())
+  readAt     DateTime?
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vehicle Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+
+  @@index([userId, readAt])
+  @@index([userId, sentAt(sort: Desc)])
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String   // Web Push key
+  auth      String   // Web Push auth
+  userAgent String?  // e.g. "Chrome/124 Pixel 9"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
