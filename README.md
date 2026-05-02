@@ -4,24 +4,24 @@ A Progressive Web App (PWA) to track fuel, maintenance, and costs for your vehic
 
 ## Features
 
-- **Fuel tracking** — log fill-ups, calculate km/L, monitor mileage trends
-- **Maintenance** — track service intervals by km and time, get due-soon alerts
-- **Renewals** — insurance, revenue license, emission test reminders
-- **Expense ledger** — unified cost dashboard across all categories
-- **Push notifications** — maintenance and renewal alerts via Web Push
-- **Offline support** — works without internet after first load
-- **PWA** — installs on Android home screen like a native app
+- **Fuel tracking** - log fill-ups, calculate km/L, monitor mileage trends
+- **Maintenance** - track service intervals by km and time, get due-soon alerts
+- **Renewals** - insurance, revenue license, emission test reminders
+- **Expense ledger** - unified cost dashboard across all categories
+- **Push notifications** - maintenance and renewal alerts via Web Push
+- **Offline support** - works without internet after first load
+- **PWA** - installs on Android home screen like a native app
 
 ## Stack
 
-- **Framework** — Next.js 14 (App Router) + TypeScript
-- **Styling** — Tailwind CSS + shadcn/ui
-- **Auth** — Clerk
-- **Database** — PostgreSQL (Neon serverless)
-- **ORM** — Prisma
-- **Charts** — Recharts
-- **PWA** — next-pwa (Workbox)
-- **Hosting** — Vercel
+- **Framework** - Next.js 14 (App Router) + TypeScript
+- **Styling** - Tailwind CSS + shadcn/ui
+- **Auth** - Clerk
+- **Database** - PostgreSQL (Neon serverless)
+- **ORM** - Prisma
+- **Charts** - Recharts
+- **PWA** - next-pwa (Workbox)
+- **Hosting** - Vercel
 
 ## Getting Started
 
@@ -68,5 +68,5 @@ Live: [https://bike-route.vercel.app](https://bike-route.vercel.app)
 ## Install as PWA (Android)
 
 1. Open [https://bike-route.vercel.app](https://bike-route.vercel.app) in Chrome
-2. Tap the 3-dot menu → **Add to Home screen**
+2. Tap the 3 dot menu → **Add to Home screen**
 3. The app installs and opens full screen like a native app
